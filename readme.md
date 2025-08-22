@@ -345,12 +345,6 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 - **Open Source Tools**: Built upon the foundation of traditional network tools (nmap, whois, dig, etc.)
 - **Security Community**: Inspired by the need for comprehensive IP intelligence in security operations
 
-## 📞 Support
-
-- **Issues**: [GitHub Issues](https://github.com/yourusername/ip-tracer/issues)
-- **Documentation**: [Project Wiki](https://github.com/yourusername/ip-tracer/wiki)
-- **Security**: Report security issues privately to security@yourdomain.com
-
 ---
 
 **Disclaimer**: This tool is provided "as is" without warranty. Users are responsible for complying with all applicable laws and regulations. Always obtain proper authorization before scanning networks or systems you do not own.
