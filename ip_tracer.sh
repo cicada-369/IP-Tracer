@@ -25,6 +25,9 @@ PURPLE='\033[0;35m'
 CYAN='\033[0;36m'
 NC='\033[0m' # No Color
 
+# Passive mode: skip active reconnaissance (ping, traceroute, nmap)
+PASSIVE_MODE="${PASSIVE_MODE:-false}"
+
 # Function to print colored headers
 print_header() {
     echo -e "${BLUE}=================================================================================${NC}"
@@ -113,20 +116,29 @@ process_single_ip() {
     echo -e "${CYAN}Results will be saved to: $output_file${NC}\n"
     
     # 1. Basic Connectivity Test with Ping
-    print_section "1. CONNECTIVITY TEST (ping)"
-    output_file_only "1. CONNECTIVITY TEST (ping)"
-    output_file_only "----------------------------------------"
-    if command_exists ping; then
-        echo "Testing connectivity to $target_ip..."
-        output_file_only "Testing connectivity to $target_ip..."
-        ping_result=$(ping -c 4 -W 3 "$target_ip" 2>/dev/null || echo "Host appears to be unreachable or blocking ICMP")
-        echo "$ping_result"
-        output_file_only "$ping_result"
+    if [[ "$PASSIVE_MODE" == "true" ]]; then
+        print_section "1. CONNECTIVITY TEST (ping)"
+        output_file_only "1. CONNECTIVITY TEST (ping)"
+        output_file_only "----------------------------------------"
+        echo -e "${YELLOW}Skipped in passive mode: active connectivity test not run${NC}"
+        output_file_only "Skipped in passive mode: active connectivity test not run"
+        output_file_only ""
     else
-        echo -e "${RED}ping command not found${NC}"
-        output_file_only "ping command not found"
+        print_section "1. CONNECTIVITY TEST (ping)"
+        output_file_only "1. CONNECTIVITY TEST (ping)"
+        output_file_only "----------------------------------------"
+        if command_exists ping; then
+            echo "Testing connectivity to $target_ip..."
+            output_file_only "Testing connectivity to $target_ip..."
+            ping_result=$(ping -c 4 -W 3 "$target_ip" 2>/dev/null || echo "Host appears to be unreachable or blocking ICMP")
+            echo "$ping_result"
+            output_file_only "$ping_result"
+        else
+            echo -e "${RED}ping command not found${NC}"
+            output_file_only "ping command not found"
+        fi
+        output_file_only ""
     fi
-    output_file_only ""
     
     # 2. WHOIS Information
     print_section "2. WHOIS INFORMATION"
@@ -187,49 +199,67 @@ process_single_ip() {
     output_file_only ""
     
     # 4. Network Path Tracing
-    print_section "4. NETWORK PATH TRACING (traceroute)"
-    output_file_only "4. NETWORK PATH TRACING (traceroute)"
-    output_file_only "----------------------------------------"
-    if command_exists traceroute; then
-        echo "Tracing network path to $target_ip..."
-        output_file_only "Tracing network path to $target_ip..."
-        trace_result=$(timeout 30 traceroute -n -m 15 "$target_ip" 2>/dev/null || echo "Traceroute failed or timed out")
-        echo "$trace_result"
-        output_file_only "$trace_result"
-    elif command_exists tracepath; then
-        echo "Tracing network path using tracepath..."
-        output_file_only "Tracing network path using tracepath..."
-        tracepath_result=$(timeout 30 tracepath -n "$target_ip" 2>/dev/null || echo "Tracepath failed or timed out")
-        echo "$tracepath_result"
-        output_file_only "$tracepath_result"
+    if [[ "$PASSIVE_MODE" == "true" ]]; then
+        print_section "4. NETWORK PATH TRACING (traceroute)"
+        output_file_only "4. NETWORK PATH TRACING (traceroute)"
+        output_file_only "----------------------------------------"
+        echo -e "${YELLOW}Skipped in passive mode: traceroute not run${NC}"
+        output_file_only "Skipped in passive mode: traceroute not run"
+        output_file_only ""
     else
-        echo -e "${RED}Neither traceroute nor tracepath found${NC}"
-        output_file_only "Neither traceroute nor tracepath found"
+        print_section "4. NETWORK PATH TRACING (traceroute)"
+        output_file_only "4. NETWORK PATH TRACING (traceroute)"
+        output_file_only "----------------------------------------"
+        if command_exists traceroute; then
+            echo "Tracing network path to $target_ip..."
+            output_file_only "Tracing network path to $target_ip..."
+            trace_result=$(timeout 30 traceroute -n -m 15 "$target_ip" 2>/dev/null || echo "Traceroute failed or timed out")
+            echo "$trace_result"
+            output_file_only "$trace_result"
+        elif command_exists tracepath; then
+            echo "Tracing network path using tracepath..."
+            output_file_only "Tracing network path using tracepath..."
+            tracepath_result=$(timeout 30 tracepath -n "$target_ip" 2>/dev/null || echo "Tracepath failed or timed out")
+            echo "$tracepath_result"
+            output_file_only "$tracepath_result"
+        else
+            echo -e "${RED}Neither traceroute nor tracepath found${NC}"
+            output_file_only "Neither traceroute nor tracepath found"
+        fi
+        output_file_only ""
     fi
-    output_file_only ""
     
     # 5. Port Scanning and OS Detection
-    print_section "5. PORT SCANNING & OS DETECTION (nmap)"
-    output_file_only "5. PORT SCANNING & OS DETECTION (nmap)"
-    output_file_only "----------------------------------------"
-    if command_exists nmap; then
-        echo "Scanning common ports on $target_ip..."
-        echo "Note: This may take a few minutes and could be detected by security systems"
-        output_file_only "Scanning common ports on $target_ip..."
-        output_file_only "Note: This may take a few minutes and could be detected by security systems"
-        
-        # Quick scan of common ports
-        nmap_result=$(nmap -T4 -F -O --osscan-guess "$target_ip" 2>/dev/null || {
-            echo "OS detection failed, trying basic port scan..."
-            nmap -T4 -F "$target_ip" 2>/dev/null
-        })
-        echo "$nmap_result"
-        output_file_only "$nmap_result"
+    if [[ "$PASSIVE_MODE" == "true" ]]; then
+        print_section "5. PORT SCANNING & OS DETECTION (nmap)"
+        output_file_only "5. PORT SCANNING & OS DETECTION (nmap)"
+        output_file_only "----------------------------------------"
+        echo -e "${YELLOW}Skipped in passive mode: nmap not run${NC}"
+        output_file_only "Skipped in passive mode: nmap not run"
+        output_file_only ""
     else
-        echo -e "${RED}nmap command not found${NC}"
-        output_file_only "nmap command not found"
+        print_section "5. PORT SCANNING & OS DETECTION (nmap)"
+        output_file_only "5. PORT SCANNING & OS DETECTION (nmap)"
+        output_file_only "----------------------------------------"
+        if command_exists nmap; then
+            echo "Scanning common ports on $target_ip..."
+            echo "Note: This may take a few minutes and could be detected by security systems"
+            output_file_only "Scanning common ports on $target_ip..."
+            output_file_only "Note: This may take a few minutes and could be detected by security systems"
+
+            # Quick scan of common ports
+            nmap_result=$(nmap -T4 -F -O --osscan-guess "$target_ip" 2>/dev/null || {
+                echo "OS detection failed, trying basic port scan..."
+                nmap -T4 -F "$target_ip" 2>/dev/null
+            })
+            echo "$nmap_result"
+            output_file_only "$nmap_result"
+        else
+            echo -e "${RED}nmap command not found${NC}"
+            output_file_only "nmap command not found"
+        fi
+        output_file_only ""
     fi
-    output_file_only ""
     
     # 6. IP Geolocation using APIs
     print_section "6. GEOLOCATION INFORMATION (curl/wget)"
@@ -592,8 +622,19 @@ process_batch() {
 
 # Main execution function
 main() {
-    local input=$1
-    local flag=${2:-""}
+    # Parse --passive anywhere in the argument list.
+    local args=()
+    local arg
+    for arg in "$@"; do
+        if [[ "$arg" == "--passive" ]]; then
+            PASSIVE_MODE="true"
+        else
+            args+=("$arg")
+        fi
+    done
+
+    local input=${args[0]:-""}
+    local flag=${args[1]:-""}
     
     # Handle different input modes
     case "$input" in
@@ -611,6 +652,10 @@ main() {
             ;;
         "--check")
             check_dependencies
+            exit 0
+            ;;
+        "--version"|"-v")
+            echo "IP Tracer Script v2.2"
             exit 0
             ;;
         "")
@@ -643,13 +688,21 @@ show_help() {
     echo "  Single IP:     $0 <IP_ADDRESS>"
     echo "  Batch mode:    $0 -f <IP_LIST_FILE>"
     echo "  Batch mode:    $0 --batch <IP_LIST_FILE>"
+    echo "  Passive mode:  $0 --passive <IP_ADDRESS>"
+    echo "  Passive mode:  $0 --passive -f <IP_LIST_FILE>"
     echo "  Check deps:    $0 --check"
+    echo "  Show version:  $0 --version"
     echo "  Show help:     $0 --help"
     echo ""
     echo "EXAMPLES:"
     echo "  $0 8.8.8.8"
     echo "  $0 -f suspicious_ips.txt"
     echo "  $0 --batch ip_list.txt"
+    echo "  $0 --passive 8.8.8.8"
+    echo ""
+    echo "PASSIVE MODE:"
+    echo "  Skips ping, traceroute, and nmap. Runs WHOIS, DNS, geolocation,"
+    echo "  threat-intelligence APIs, and OSINT only."
     echo ""
     echo "IP LIST FILE FORMAT:"
     echo "  - One IP address per line"
@@ -722,27 +775,5 @@ check_dependencies() {
 
 # Script execution starts here
 if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
-    # Handle different argument patterns
-    if [[ $# -eq 0 ]]; then
-        echo -e "${RED}Error: No arguments provided${NC}"
-        show_help
-        exit 1
-    elif [[ $# -eq 1 ]]; then
-        main "$1"
-    elif [[ $# -eq 2 ]]; then
-        # Handle -f flag in either position
-        if [[ "$1" == "-f" || "$1" == "--file" || "$1" == "--batch" ]]; then
-            main "$1" "$2"
-        elif [[ "$2" == "-f" || "$2" == "--file" || "$2" == "--batch" ]]; then
-            main "$2" "$1"
-        else
-            echo -e "${RED}Error: Invalid arguments${NC}"
-            show_help
-            exit 1
-        fi
-    else
-        echo -e "${RED}Error: Too many arguments${NC}"
-        show_help
-        exit 1
-    fi
+    main "$@"
 fi

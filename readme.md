@@ -1,6 +1,6 @@
 # IP Tracer - Comprehensive IP Intelligence Tool
 
-[![Version](https://img.shields.io/badge/version-2.2-blue.svg)](https://github.com/yourusername/ip-tracer)
+[![Version](https://img.shields.io/badge/version-2.2-blue.svg)](https://github.com/cicada-369/IP-Tracer)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![Bash](https://img.shields.io/badge/language-Bash-red.svg)](https://www.gnu.org/software/bash/)
 
@@ -12,7 +12,7 @@ A comprehensive IP address investigation tool that combines traditional network 
 - **Single IP Analysis** - Detailed investigation of individual IP addresses
 - **Batch Processing** - Process hundreds of IPs from text files automatically
 - **Automated Reporting** - Generate timestamped reports in text format
-- **Multi-source Intelligence** - Combines 6 major threat intelligence sources
+- **Multi-source Intelligence** - Combines five threat-intelligence APIs plus OSINT
 
 ### Network Reconnaissance Tools
 - **Connectivity Testing** (`ping`) - Basic reachability and response time
@@ -50,8 +50,8 @@ brew install nmap wget jq
 ### Download Script
 ```bash
 # Clone repository
-git clone https://github.com/yourusername/ip-tracer.git
-cd ip-tracer
+git clone https://github.com/cicada-369/IP-Tracer.git
+cd IP-Tracer
 
 # Make executable
 chmod +x ip_tracer.sh
@@ -132,6 +132,18 @@ Process the batch:
 # Alternative syntax
 ./ip_tracer.sh --batch ip_list.txt
 ```
+
+### Passive Mode
+Run only non-intrusive sources — WHOIS, DNS, geolocation, the threat-intelligence
+APIs, and OSINT:
+
+```bash
+./ip_tracer.sh --passive 203.0.113.45
+./ip_tracer.sh --passive -f suspicious_ips.txt
+```
+
+Passive mode skips ping, traceroute, and nmap. Use it when the target is not
+yours and you have no authorization to probe it.
 
 ### Other Commands
 ```bash
