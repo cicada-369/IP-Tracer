@@ -75,27 +75,62 @@ The script supports multiple threat intelligence APIs. While not required, confi
 
 ### Setup Methods
 
-#### Method 1: Environment Variables (Recommended)
-```bash
-# Add to ~/.bashrc or ~/.zshrc
-export ABUSEIPDB_API_KEY="your_abuseipdb_key_here"
-export VIRUSTOTAL_API_KEY="your_virustotal_key_here"
-export SHODAN_API_KEY="your_shodan_key_here"
-export CENSYS_API_ID="your_censys_id_here"
-export CENSYS_API_SECRET="your_censys_secret_here"
-export SECURITYTRAILS_API_KEY="your_securitytrails_key_here"
+#### Method 1: A protected environment file (Recommended)
 
-# Reload configuration
-source ~/.bashrc
+Create the file outside the repository and restrict it to your user:
+
+```bash
+mkdir -p ~/.config/ip-tracer
+chmod 700 ~/.config/ip-tracer
+touch ~/.config/ip-tracer/env
+chmod 600 ~/.config/ip-tracer/env
 ```
 
-#### Method 2: Direct Script Editing
-Edit the API configuration section at the top of `ip_tracer.sh`:
-```bash
-ABUSEIPDB_API_KEY="your_key_here"
-VIRUSTOTAL_API_KEY="your_key_here"
-# ... etc
+Add one variable per line:
+
+```text
+ABUSEIPDB_API_KEY=your_key_here
+VIRUSTOTAL_API_KEY=your_key_here
+SHODAN_API_KEY=your_key_here
+CENSYS_API_ID=your_id_here
+CENSYS_API_SECRET=your_secret_here
+SECURITYTRAILS_API_KEY=your_key_here
 ```
+
+Never commit this file. `.env`, `.env.*`, and `secrets/` are ignored.
+
+#### Method 2: Load the keys only for this tool
+
+Create `~/.local/bin/ip-tracer`:
+
+```bash
+#!/usr/bin/env bash
+set -euo pipefail
+set -a
+. "$HOME/.config/ip-tracer/env"
+set +a
+exec "$HOME/projects/IP-Tracer/ip_tracer.sh" "$@"
+```
+
+```bash
+mkdir -p ~/.local/bin
+chmod 700 ~/.local/bin/ip-tracer
+ip-tracer --help
+```
+
+This keeps the keys out of your shell profile and out of unrelated processes.
+
+#### Method 3: Session-only variables
+
+Use this when you do not want the keys written to disk:
+
+```bash
+read -r -s -p 'AbuseIPDB key: ' ABUSEIPDB_API_KEY; export ABUSEIPDB_API_KEY; echo
+read -r -s -p 'VirusTotal key: ' VIRUSTOTAL_API_KEY; export VIRUSTOTAL_API_KEY; echo
+```
+
+**Never edit the keys into `ip_tracer.sh` itself.** A committed key is a leaked
+key: rotate it at the provider and purge it from history.
 
 ## 🎯 Usage
 
