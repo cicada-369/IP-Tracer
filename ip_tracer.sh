@@ -15,6 +15,7 @@ SHODAN_API_KEY="${SHODAN_API_KEY:-xxx}" # Get from: https://account.shodan.io/
 CENSYS_API_ID="${CENSYS_API_ID:-xxx}" # Get from: https://search.censys.io/account/api
 CENSYS_API_SECRET="${CENSYS_API_SECRET:-xxx}" # Get from: https://search.censys.io/account/api
 SECURITYTRAILS_API_KEY="${SECURITYTRAILS_API_KEY:-xxx}" # Get from: https://securitytrails.com/corp/api
+IPAPI_PRO_API_KEY="${IPAPI_PRO_API_KEY:-xxx}" # Optional; free ip-api endpoint is HTTP-only. Get from: https://ip-api.com/pricing
 
 # Color codes for output formatting
 RED='\033[0;31m'
@@ -44,6 +45,29 @@ print_section() {
 # Function to check if command exists
 command_exists() {
     command -v "$1" >/dev/null 2>&1
+}
+
+# Read a scalar field from JSON. Uses jq when available; falls back to a
+# flat-key grep so the report still degrades usefully without jq.
+json_get() {
+    local json=$1 filter=$2 key=$3
+    if command_exists jq; then
+        printf '%s' "$json" | jq -r "$filter // empty" 2>/dev/null
+    else
+        printf '%s' "$json" | grep -o "\"$key\"[[:space:]]*:[[:space:]]*\"[^\"]*\"" | head -1 \
+            | sed -e 's/^[^:]*:[[:space:]]*"//' -e 's/"$//'
+    fi
+}
+
+# Read a boolean field from JSON with the same jq/grep fallback.
+json_get_bool() {
+    local json=$1 filter=$2 key=$3
+    if command_exists jq; then
+        printf '%s' "$json" | jq -r "$filter" 2>/dev/null
+    else
+        printf '%s' "$json" | grep -o "\"$key\"[[:space:]]*:[[:space:]]*\(true\|false\)" | head -1 \
+            | sed -e 's/^[^:]*:[[:space:]]*//'
+    fi
 }
 
 # Function to validate IP address format
@@ -84,6 +108,7 @@ process_single_ip() {
     local date_str=$(date +%Y%m%d)
     local time_str=$(date +%H%M%S)
     local output_file="ip_trace_${target_ip}_${date_str}_${time_str}.txt"
+    HOST_CLASS_SUMMARY="unknown"
     
     # Function to output both to console and file
     output_both() {
@@ -266,25 +291,35 @@ process_single_ip() {
     output_file_only "6. GEOLOCATION INFORMATION (curl/wget)"
     output_file_only "----------------------------------------"
     
-    # Using curl with ipinfo.io
+    # Using curl with ipinfo.io (HTTPS only)
     if command_exists curl; then
         echo "Querying ipinfo.io for geolocation data:"
         output_file_only "Querying ipinfo.io for geolocation data:"
-        ipinfo_result=$(curl -s "http://ipinfo.io/$target_ip/json" | grep -E '"(ip|city|region|country|org|postal|timezone)"' || echo "API query failed")
+        ipinfo_result=$(curl -fsS --max-time 15 "https://ipinfo.io/$target_ip/json" | grep -E '"(ip|city|region|country|org|postal|timezone)"' || echo "API query failed")
         echo "$ipinfo_result"
         output_file_only "$ipinfo_result"
-        
-        echo -e "\nQuerying ip-api.com for additional data:"
-        output_file_only ""
-        output_file_only "Querying ip-api.com for additional data:"
-        ipapi_result=$(curl -s "http://ip-api.com/json/$target_ip" | grep -E '"(query|country|regionName|city|isp|org|as)"' || echo "API query failed")
-        echo "$ipapi_result"
-        output_file_only "$ipapi_result"
-        
+
+        # ip-api's free endpoint is HTTP-only, so require its HTTPS Pro endpoint.
+        if [[ -n "$IPAPI_PRO_API_KEY" && "$IPAPI_PRO_API_KEY" != "xxx" ]]; then
+            echo -e "\nQuerying ip-api.com (Pro, HTTPS) for additional data:"
+            output_file_only ""
+            output_file_only "Querying ip-api.com (Pro, HTTPS) for additional data:"
+            ipapi_result=$(curl -fsS --max-time 15 -G "https://pro.ip-api.com/json/$target_ip" \
+                --data-urlencode "key=$IPAPI_PRO_API_KEY" \
+                --data-urlencode "fields=status,message,query,country,regionName,city,isp,org,as" \
+                | grep -E '"(query|country|regionName|city|isp|org|as|message)"' || echo "API query failed")
+            echo "$ipapi_result"
+            output_file_only "$ipapi_result"
+        else
+            echo -e "\nSkipped ip-api.com: its free endpoint does not support HTTPS. Set IPAPI_PRO_API_KEY to use the HTTPS Pro endpoint."
+            output_file_only ""
+            output_file_only "Skipped ip-api.com: free endpoint is HTTP-only; set IPAPI_PRO_API_KEY to use the HTTPS Pro endpoint."
+        fi
+
     elif command_exists wget; then
         echo "Using wget to query geolocation APIs:"
         output_file_only "Using wget to query geolocation APIs:"
-        wget_result=$(wget -qO- "http://ipinfo.io/$target_ip/json" | grep -E '"(ip|city|region|country|org|postal|timezone)"' || echo "API query failed")
+        wget_result=$(wget -qO- --timeout=15 "https://ipinfo.io/$target_ip/json" | grep -E '"(ip|city|region|country|org|postal|timezone)"' || echo "API query failed")
         echo "$wget_result"
         output_file_only "$wget_result"
     else
@@ -446,9 +481,127 @@ process_single_ip() {
         output_file_only "SecurityTrails API key not configured. Set SECURITYTRAILS_API_KEY environment variable or edit script"
     fi
     output_file_only ""
-    # 8. Additional Network Information
-    print_section "8. ADDITIONAL OSINT SOURCES"
-    output_file_only "8. ADDITIONAL OSINT SOURCES"
+    # 8. Host Classification
+    print_section "8. HOST CLASSIFICATION"
+    output_file_only "8. HOST CLASSIFICATION"
+    output_file_only "----------------------------------------"
+
+    # RDAP: structured registration data (HTTPS, follows RIR redirects).
+    local rdap_output="" rdap_name="" rdap_handle="" rdap_status=""
+    if command_exists curl; then
+        rdap_output=$(curl -fsSL --proto-redir '=https' --max-time 15 "https://rdap.org/ip/$target_ip" 2>/dev/null || true)
+        if [[ -n "$rdap_output" ]]; then
+            rdap_name=$(json_get "$rdap_output" '.name' 'name')
+            rdap_handle=$(json_get "$rdap_output" '.handle' 'handle')
+            if command_exists jq; then
+                rdap_status=$(printf '%s' "$rdap_output" | jq -r '(.status // []) | join(", ")' 2>/dev/null || true)
+            fi
+        fi
+    fi
+
+    # ASN and announced prefix via Team Cymru DNS (no HTTP, no key).
+    local asn="" asn_prefix=""
+    if command_exists dig; then
+        local rev_ip asn_raw
+        rev_ip=$(echo "$target_ip" | awk -F. '{print $4"."$3"."$2"."$1}')
+        asn_raw=$(dig +short "${rev_ip}.origin.asn.cymru.com" TXT 2>/dev/null | head -1 | tr -d '"')
+        if [[ -n "$asn_raw" && "$asn_raw" != NA* ]]; then
+            asn=$(echo "$asn_raw" | cut -d'|' -f1 | tr -d ' ')
+            asn_prefix=$(echo "$asn_raw" | cut -d'|' -f2 | tr -d ' ')
+        fi
+    fi
+
+    # AbuseIPDB fields, when the reputation section above had a key.
+    local abuse_usage="" abuse_istor=""
+    if [[ -n "${ABUSE_OUTPUT:-}" ]]; then
+        abuse_usage=$(json_get "$ABUSE_OUTPUT" '.data.usageType' 'usageType')
+        abuse_istor=$(json_get_bool "$ABUSE_OUTPUT" '.data.isTor | if . == null then empty else tostring end' 'isTor')
+    fi
+
+    local whois_status=""
+    whois_status=$(printf '%s' "${whois_result:-}" | grep -iE '^[[:space:]]*status:' | head -1 \
+        | sed -E 's/^[[:space:]]*[Ss][Tt][Aa][Tt][Uu][Ss]:[[:space:]]*//')
+
+    local hosting_state="unknown" hosting_conf="none" hosting_ev="no data"
+    local residential_state="unknown" residential_conf="none" residential_ev="no data"
+    local tor_state="unknown" tor_conf="none" tor_ev="unknown"
+    local vpn_state="unknown" vpn_conf="none" vpn_ev="no free source configured"
+    local proxy_state="unknown" proxy_conf="none" proxy_ev="no free source configured"
+
+    local ownership_text hosting_kw="" hosting_source=""
+    ownership_text=$(printf '%s %s %s' "${rdap_name:-}" "${rdap_handle:-}" "${whois_result:-}" | tr '[:lower:]' '[:upper:]')
+    if printf '%s' "$ownership_text" | grep -qE 'HOSTING|DATACENTER|DATA CENTER|CLOUD|VPS|COLO|COLOCATION|DEDICATED|TRANSIT|SERVER|SRV'; then
+        hosting_kw="yes"
+    fi
+
+    if [[ -n "$abuse_usage" ]]; then
+        if printf '%s' "$abuse_usage" | grep -qiE 'hosting|data center|transit'; then
+            hosting_state="likely"; hosting_conf="high"; hosting_source="usage"
+            hosting_ev="AbuseIPDB usageType=$abuse_usage"
+        elif printf '%s' "$abuse_usage" | grep -qi 'residential'; then
+            hosting_state="unlikely"; hosting_conf="high"; hosting_source="usage"
+            hosting_ev="AbuseIPDB usageType=$abuse_usage"
+            residential_state="likely"; residential_conf="high"
+            residential_ev="AbuseIPDB usageType=$abuse_usage"
+        fi
+    fi
+
+    if [[ "$hosting_state" == "unknown" && "$hosting_kw" == "yes" ]]; then
+        hosting_source="ownership"
+        if { [[ -n "$rdap_status" ]] && printf '%s' "$rdap_status" | grep -qiE 'ASSIGNED P[AI]'; } \
+           || printf '%s' "$whois_status" | grep -qiE 'ASSIGNED P[AI]'; then
+            hosting_state="likely"; hosting_conf="medium"
+        else
+            hosting_state="possible"; hosting_conf="low"
+        fi
+        hosting_ev="RDAP/WHOIS hosting keyword"
+        [[ -n "$rdap_name" ]] && hosting_ev="RDAP netname=${rdap_name}"
+        [[ -n "$whois_status" ]] && hosting_ev+="; WHOIS status=${whois_status}"
+        [[ -n "$asn" ]] && hosting_ev+="; AS${asn}${asn_prefix:+ (${asn_prefix})}"
+    fi
+
+    if [[ "$hosting_source" == "usage" && "$hosting_state" == "likely" ]]; then
+        [[ -n "$rdap_name" ]] && hosting_ev+="; RDAP netname=${rdap_name}"
+        [[ -n "$asn" ]] && hosting_ev+="; AS${asn}${asn_prefix:+ (${asn_prefix})}"
+    elif [[ "$hosting_state" == "unlikely" && "$hosting_kw" == "yes" ]]; then
+        hosting_conf="medium"
+        hosting_ev+="; RDAP/WHOIS name suggests hosting (sources disagree)"
+    fi
+
+    if [[ "$residential_state" == "unknown" && "$hosting_state" == "likely" ]]; then
+        residential_state="unlikely"; residential_conf="medium"
+        residential_ev="hosting allocation inferred from RDAP/WHOIS"
+    elif [[ "$residential_state" == "unknown" ]] && printf '%s' "$ownership_text" | grep -qE 'RESIDENTIAL|BROADBAND|DSL|CABLE'; then
+        residential_state="possible"; residential_conf="low"
+        residential_ev="RDAP/WHOIS residential keyword"
+    fi
+
+    if [[ "$abuse_istor" == "true" ]]; then
+        tor_state="yes"; tor_conf="high"; tor_ev="AbuseIPDB isTor=true (vendor-reported)"
+    elif [[ "$abuse_istor" == "false" ]]; then
+        tor_state="no"; tor_conf="high"; tor_ev="AbuseIPDB isTor=false (vendor-reported)"
+    elif [[ -n "${ABUSE_OUTPUT:-}" ]]; then
+        tor_state="unknown"; tor_conf="none"; tor_ev="AbuseIPDB isTor unavailable"
+    else
+        tor_state="unknown"; tor_conf="none"; tor_ev="no free Tor source configured (AbuseIPDB key not set)"
+    fi
+
+    HOST_CLASS_SUMMARY="hosting=${hosting_state};residential=${residential_state};vpn=${vpn_state};proxy=${proxy_state};tor=${tor_state}"
+
+    output_both "$(printf '%-12s %-9s %-8s %s' 'Hosting' "$hosting_state" "[$hosting_conf]" "$hosting_ev")"
+    output_both "$(printf '%-12s %-9s %-8s %s' 'Residential' "$residential_state" "[$residential_conf]" "$residential_ev")"
+    output_both "$(printf '%-12s %-9s %-8s %s' 'VPN' "$vpn_state" "[$vpn_conf]" "$vpn_ev")"
+    output_both "$(printf '%-12s %-9s %-8s %s' 'Proxy' "$proxy_state" "[$proxy_conf]" "$proxy_ev")"
+    output_both "$(printf '%-12s %-9s %-8s %s' 'Tor' "$tor_state" "[$tor_conf]" "$tor_ev")"
+    output_both ""
+    output_both "Summary: $HOST_CLASS_SUMMARY"
+    output_both "Note: classification is inferred from registration and reputation data, not observed traffic."
+    output_both "VPN and proxy detection require a paid source."
+    output_file_only ""
+
+    # 9. Additional Network Information
+    print_section "9. ADDITIONAL OSINT SOURCES"
+    output_file_only "9. ADDITIONAL OSINT SOURCES"
     output_file_only "----------------------------------------"
     
     # Manual OSINT sources
@@ -523,8 +676,8 @@ process_single_ip() {
     output_file_only "Report generated by IP Tracer Script v2.2"
     
     # Add to batch summary if in batch mode
-    if [[ "$batch_mode" == "true" ]]; then
-        echo "$target_ip,$output_file,$(date)" >> "batch_summary_${date_str}_${time_str}.csv"
+    if [[ "$batch_mode" == "true" && -n "${BATCH_SUMMARY_FILE:-}" ]]; then
+        echo "$target_ip,$output_file,$(date -u +%Y-%m-%dT%H:%M:%SZ),${HOST_CLASS_SUMMARY:-unknown}" >> "$BATCH_SUMMARY_FILE"
         return 0
     fi
 }
@@ -573,7 +726,8 @@ process_batch() {
     local batch_summary="batch_summary_${date_str}_${time_str}.csv"
     
     # Initialize batch summary file
-    echo "IP_Address,Report_File,Completion_Time" > "$batch_summary"
+    BATCH_SUMMARY_FILE="$batch_summary"
+    echo "IP_Address,Report_File,Completion_Time,Host_Class" > "$batch_summary"
     
     print_header "BATCH IP TRACER - Processing $total_ips IPs from $ip_file"
     echo -e "${GREEN}Batch started at: $(date)${NC}"
@@ -702,7 +856,7 @@ show_help() {
     echo ""
     echo "PASSIVE MODE:"
     echo "  Skips ping, traceroute, and nmap. Runs WHOIS, DNS, geolocation,"
-    echo "  threat-intelligence APIs, and OSINT only."
+    echo "  host classification, threat-intelligence APIs, and OSINT only."
     echo ""
     echo "IP LIST FILE FORMAT:"
     echo "  - One IP address per line"
@@ -728,6 +882,8 @@ show_help() {
     echo "    * SecurityTrails - Historical DNS and passive DNS"
     echo "  - Network reconnaissance tools (nmap, traceroute, etc.)"
     echo "  - Geolocation and ISP information"
+    echo "  - Host classification (hosting, residential, VPN, proxy, Tor)"
+    echo "    with evidence and confidence for each flag"
     echo ""
     echo "OUTPUT FILES:"
     echo "  Single IP:  ip_trace_<IP>_<DATE>_<TIME>.txt"
@@ -741,6 +897,7 @@ show_help() {
     echo "  export CENSYS_API_ID='your_id_here'"
     echo "  export CENSYS_API_SECRET='your_secret_here'"
     echo "  export SECURITYTRAILS_API_KEY='your_key_here'"
+    echo "  export IPAPI_PRO_API_KEY='your_key_here'   # optional, for HTTPS ip-api"
     echo ""
     echo "API SOURCES:"
     echo "  - AbuseIPDB: https://www.abuseipdb.com/api"
@@ -748,6 +905,7 @@ show_help() {
     echo "  - Shodan: https://account.shodan.io/"
     echo "  - Censys: https://search.censys.io/account/api"
     echo "  - SecurityTrails: https://securitytrails.com/corp/api"
+    echo "  - ip-api (Pro): https://ip-api.com/pricing"
 }
 
 # Check for required tools and provide installation suggestions

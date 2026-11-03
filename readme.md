@@ -30,6 +30,20 @@ A comprehensive IP address investigation tool that combines traditional network 
 - **📊 SecurityTrails** - Historical DNS and passive DNS records
 - **🌐 Additional OSINT** - 20+ manual verification sources
 
+### Host Classification
+The report also answers what kind of host the address is, as independent flags
+with the evidence and confidence behind each one:
+
+- **Hosting** - from AbuseIPDB `usageType`, or RDAP/WHOIS allocation keywords
+- **Residential** - from AbuseIPDB `usageType`, or ISP/broadband keywords
+- **VPN** and **Proxy** - reported as unknown; no free source distinguishes them reliably
+- **Tor** - from AbuseIPDB `isTor` when a key is configured
+
+Sources are free and HTTPS-only: AbuseIPDB (if configured), RDAP via
+`rdap.org`, Team Cymru ASN data, and the WHOIS output already in the report.
+Every confidence level is stated, and missing evidence is printed rather than
+guessed. Batch summaries include the classification in a `Host_Class` column.
+
 ## 📦 Installation
 
 ### Prerequisites
@@ -73,6 +87,10 @@ The script supports multiple threat intelligence APIs. While not required, confi
 | **Censys** | ✅ 250/month | [Get API Keys](https://search.censys.io/account/api) | `CENSYS_API_ID`, `CENSYS_API_SECRET` |
 | **SecurityTrails** | ✅ 50/month | [Get API Key](https://securitytrails.com/corp/api) | `SECURITYTRAILS_API_KEY` |
 
+Geolocation uses `ipinfo.io` over HTTPS. `ip-api.com`'s free endpoint is
+HTTP-only, so the script only queries its HTTPS Pro endpoint when
+`IPAPI_PRO_API_KEY` is set; otherwise the section is skipped and says so.
+
 ### Setup Methods
 
 #### Method 1: A protected environment file (Recommended)
@@ -95,6 +113,8 @@ SHODAN_API_KEY=your_key_here
 CENSYS_API_ID=your_id_here
 CENSYS_API_SECRET=your_secret_here
 SECURITYTRAILS_API_KEY=your_key_here
+# Optional: enables the HTTPS Pro endpoint for ip-api.com
+IPAPI_PRO_API_KEY=your_key_here
 ```
 
 Never commit this file. `.env`, `.env.*`, and `secrets/` are ignored.
@@ -201,7 +221,7 @@ yours and you have no authorization to probe it.
 ### Batch Processing
 - **Individual Reports**: `ip_trace_{IP}_{DATE}_{TIME}.txt` for each IP
 - **Batch Summary**: `batch_summary_{DATE}_{TIME}.csv` with processing results
-- **Format**: CSV with IP, report filename, and completion timestamp
+- **Format**: CSV with IP, report filename, completion timestamp, and `Host_Class` flags
 
 ### Sample Report Structure
 ```
@@ -256,6 +276,9 @@ grep -h "abuseConfidencePercentage" ip_trace_*.txt | grep -v ": 0"
 
 # Extract all open ports
 grep "Port.*Open" ip_trace_*.txt
+
+# Find addresses classified as hosting
+grep -i "hosting=likely" batch_summary_*.csv
 
 # View batch summary
 column -t -s',' batch_summary_*.csv
